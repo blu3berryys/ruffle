@@ -2,7 +2,7 @@ name: Download translations from Crowdin
 
 on:
   schedule:
-    - cron: '0 21 * * *'
+    - cron: '0 0 * * *'
   workflow_dispatch:
 
 jobs:
@@ -13,8 +13,9 @@ jobs:
 
     strategy:
       max-parallel: 1
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Install dependencies
@@ -23,19 +24,18 @@ jobs:
 
       - name: Generate desktop & metainfo sources
         working-directory: desktop/packages/linux
-        run: |
-          make update
+        run: make update
 
-      # Crowdin action creates files and directories as root,
-      # however we need write access to them to apply changes,
-      # so just create them here instead of relying on Crowdin.
       - name: Create locale directories
         working-directory: desktop/packages/linux
         run: |
           mkdir -p locale/rs.ruffle.Ruffle.desktop
           mkdir -p locale/rs.ruffle.Ruffle.metainfo.xml
 
-      - name: Crowdin download
+      # Crowdin action creates files and directories as root,
+      # however we need write access to them to apply changes,
+      # so just create them here instead of relying on Crowdin.
+      - name: Download translations from Crowdin
         uses: crowdin/github-action@v2
         with:
           config: 'crowdin.yml'
@@ -49,15 +49,14 @@ jobs:
 
       - name: Apply desktop & metainfo sources
         working-directory: desktop/packages/linux
-        run: |
-          make apply
+        run: make apply
 
-      - name: Upload intermediate files
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           path: desktop/packages/linux/locale
 
-      - name: Commit
+      - name: Commit changes
         run: |
           git config user.name "RuffleBuild"
           git config user.email "ruffle@ruffle.rs"
@@ -65,17 +64,20 @@ jobs:
           git add -A
           git commit -m 'chore: Update translations from Crowdin'
 
-      - name: Push
+      - name: Push changes
         uses: ad-m/github-push-action@master
         with:
           branch: l10n_crowdin_translations
           github_token: ${{ secrets.RUFFLE_BUILD_TOKEN }}
           force: true
 
-      - name: Create a PR
+      - name: Create or update pull request
         run: |
           prs=$(gh pr list --base master --head l10n_crowdin_translations --limit 1 --json id | jq length)
-          if [ "$prs" = 1 ]; then echo "PR already exists"; exit 0; fi
+          if [ "$prs" = 1 ]; then 
+            echo "PR already exists"; 
+            exit 0; 
+          fi
 
           pr_url=$(gh pr create \
             --title 'chore: Update translations' \
@@ -83,10 +85,6 @@ jobs:
             --head l10n_crowdin_translations \
             --base master)
 
-          # This has to be done separately from creating a PR, because
-          # GitHub currently has issues with creating a PR with labels.
-          # Basically creating a PR works, adding labels works, but creating
-          # a PR with labels doesn't ¯\_(ツ)_/¯
           gh pr edit "$pr_url" --add-label T-chore --add-label A-i18n
         env:
           # Use a custom token rather than the automatic GITHUB_TOKEN, as the automatic one doesn't allow created PRs to trigger workflows
